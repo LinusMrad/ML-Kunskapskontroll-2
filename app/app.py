@@ -4,6 +4,7 @@ import joblib
 import numpy as np
 from PIL import Image, ImageOps
 import cv2
+from pathlib import Path
 
 # Skapa en första sida
 st.set_page_config(page_title="MNIST bildigenkänning", layout="centered")
@@ -13,18 +14,31 @@ st.title("MNIST känn igen siffror")
 st.write("Ladda upp en bild eller ta en ny bild")
 
 #ladda in modellen Extra Trees
-MODEL_PATH = "../models/Extra_trees_mnist_model.pkl"
+BASE_DIR = Path(__file__).resolve().parents[1]
+
+model_choice = st.selectbox(
+    "Välj modell",
+    ["Extra Trees", "SVC"]
+)
+
+if model_choice == "Extra Trees":
+    MODEL_PATH = BASE_DIR / "models" / "Extra_trees_mnist_model.pkl"
+else:
+    MODEL_PATH = BASE_DIR / "models" / "SVC_model.pkl"
+
+st.write("sökväg", MODEL_PATH)
+st.write("dinns titeln?", MODEL_PATH.exists())
 
 # skapa en funktioner för laddning av modell
 @st.cache_resource
-def load_model(path: str):
-    return joblib.load(path)
+def load_model(path):
+    return joblib.load(str(path))
 
 #
 try:
     model = load_model(MODEL_PATH)
 except Exception as e:
-    st.error(f"Kunde inte ladda modell")
+    st.error(f"Kunde inte ladda modell: {e}")
     st.stop()
 
 # Skapa input
@@ -81,7 +95,7 @@ def preprocess_to_mnist(pil_img: Image.Image):
     square = np.zeros((size, size), dtype=np.uint8)
     x_off = (size - w)//2
     y_off = (size - h)//2
-    square[4:28, 4:24] = digit
+    square[y_off:y_off+h, x_off:x_off+w] = digit
 
     # Formatera om till 20 x 20 sen padding till 28 x 28
     digit_20 = cv2.resize(square, (20, 20), interpolation=cv2.INTER_AREA)
@@ -100,7 +114,7 @@ if image is not None:
 
     #Visa hur modellen ser bilden
     st.subheader("Föbehandlad")
-    preview = X.reshape(28, 28).astye(np.uint8)
+    preview = X.reshape(28, 28).astype(np.uint8)
     st.image(preview, caption="MNIST-format (vit siffra på svart bakgrund)", use_column_width=False)
 
     # Prediktion
