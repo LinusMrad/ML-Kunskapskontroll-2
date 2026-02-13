@@ -42,8 +42,15 @@ except Exception as e:
     st.stop()
 
 # Skapa input
-img_file = st.file_uploader("LAdda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
-cam = st.camera_input("Eller ta en bild med kameran")
+img_choice = st.selectbox(
+    "Välj metod",
+    ["Ladda upp en bild", "Ta en bild"]
+)
+
+if img_choice == "Ladda upp bild":
+    img_file = st.file_uploader("LAdda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
+else:    
+    cam = st.camera_input("Eller ta en bild med kameran")
 
 image = None
 if img_file is not None:
