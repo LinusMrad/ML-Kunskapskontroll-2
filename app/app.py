@@ -121,9 +121,46 @@ if image is not None:
     pred = model.predict(X)[0]
     st.success(f"predikterad siffra: **{pred}**")
 
+    import pandas as pd
+
+    st.subheader("Modellens säkerhet (Top 3)")
+
+    probs = None
+
+    # 1️⃣ Om modellen har riktiga sannolikheter
     if hasattr(model, "predict_proba"):
         probs = model.predict_proba(X)[0]
-        st.subheader("sannolikheter")
-        st.bar_chart(probs)
-else:
-    st.info("Ladda upp en bild eller ta en bild för att få en prediktion")    
+
+    # 2️⃣ Om SVC utan probability=True
+    elif hasattr(model, "decision_function"):
+        scores = model.decision_function(X)
+        scores = np.ravel(scores)
+
+        # stabil softmax
+        scores = scores - np.max(scores)
+        exp_scores = np.exp(scores)
+        probs = exp_scores / np.sum(exp_scores)
+
+    if probs is not None:
+        # skapa pandas-serie med etiketter 0–9
+        probs_series = pd.Series(probs, index=list(range(10)))
+
+        # sortera och ta topp 3
+        top3 = probs_series.sort_values(ascending=False).head(3)
+
+        # konvertera till procent
+        top3_percent = top3 * 100
+
+        # visa stapeldiagram
+        st.bar_chart(top3_percent)
+
+        # visa tydlig text
+        best_class = top3.index[0]
+        best_prob = top3_percent.iloc[0]
+
+        st.markdown(
+            f"### Mest sannolik: **{best_class}** ({best_prob:.1f}%)"
+        )
+
+    else:
+        st.info("Modellen stödjer inte sannolikhetsvisning.")
