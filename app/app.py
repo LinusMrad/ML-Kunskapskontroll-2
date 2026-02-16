@@ -96,6 +96,16 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
             cv2.THRESH_BINARY_INV,
             35, 7
         )
+        """
+        Behåll för att testa senare. 
+        W = th.shape[1]
+        k = max(25, min(80, W // 25))   # typ W/25 men clampad mellan 25 och 80
+
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, 1))
+        h_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, h_kernel, iterations=1)
+
+        th = cv2.bitwise_and(th, cv2.bitwise_not(h_lines))
+        """
 
         # dynamisk kernel så den faktiskt hittar linjer i stora bilder
         W = th.shape[1]
