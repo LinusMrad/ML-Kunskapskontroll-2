@@ -82,8 +82,18 @@ def remove_ruled_lines(gray: np.ndarray):
     h_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, h_kernel, iterations=1)
 
     # Hitta vertikala linjer
-    v_kernel = h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
-    v_lines = cv2.morphologyEx(th)
+    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
+    v_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, v_kernel, iterations=1)
+
+    # mask av linjer
+    lines = cv2.bitwise_or(h_lines, v_lines)
+
+    # Ta bort linjer från threshold bild
+    th_no_lines = cv2.bitwise_and(th, cv2.bitwise_not(lines))
+
+    #
+    cleaned = cv2.bitwise_not(th_no_lines)
+    return cleaned
 
 # Förbehandling av bilder
 def preprocess_to_mnist(pil_img: Image.Image):
@@ -99,19 +109,32 @@ def preprocess_to_mnist(pil_img: Image.Image):
     """
     # gråskala
     pil_grey = ImageOps.grayscale(pil_img)
-
+    
     # omvandla till array
     img = np.array(pil_grey)
 
-    # brusreducering
-    img = cv2.GaussianBlur(img, (5, 5), 0)
+    # ta bort linjerat papper
+    clean = remove_ruled_lines(img)
 
-    # Separera siffran från bakgrunden
-    _, th = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    #Blur
+    clean = cv2.GaussianBlur(clean, (7, 7), 0)
 
-    #om bakgrunden är vit inverterar vi färgerna.
-    if np.sum(th == 255) > np.sum(th == 0):
-        th = 255 - th
+    # apaptiv threshold. 
+    th = cv2.adaptiveThreshold(
+        clean,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        35,
+        15
+    )
+
+    # Ta bort prickar
+    kernel = np.ones((3, 3), np.uint8)
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    # bredda streck
+    th = cv2.dilate(th, kernel, iterations=1)
 
     # hitta konturerna (Siffran)
     contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -120,26 +143,51 @@ def preprocess_to_mnist(pil_img: Image.Image):
         flat = resized.astype(np.float32).reshape(1, -1)
         return flat
 
-    # största konturen antas vara siffran
-    c = max(contours, key=cv2.contourArea)
+    #välj den mest sannolika konturen som är siffran
+    H, W = th.shape[:2]
+    cands = []
+
+    for c in contours:
+        x, y, w, h = cv2.boundingRect(c)
+        area = w * h
+
+        if area < 80:
+            continue
+
+        aspect = w / max(h, 1)
+
+        #filtera bort långsmala linjer
+        if aspect > 6:
+            continue
+
+        #välj kontur nära mitten    
+        cx, cy = x + w/2, y + h/2
+        dist = (cx - W/2)**2 + (cy - H/2)**2
+        cands.append((dist, c))
+
+    # fallback om allt filtrerades bort
+    c = min(cands, key=lambda t: t[0])[1] if cands else max(contours, key=cv2.contourArea)
+
     x, y, w, h = cv2.boundingRect(c)
     digit = th[y:y+h, x:x+w]
 
-    # Gör bilden kvadratisk med padding så siffran blir rak
+    # Gör bilden kvadratisk
     size = max(w, h)
     square = np.zeros((size, size), dtype=np.uint8)
     x_off = (size - w)//2
     y_off = (size - h)//2
     square[y_off:y_off+h, x_off:x_off+w] = digit
 
-    # Formatera om till 20 x 20 sen padding till 28 x 28
+    # Resize till 20x20
     digit_20 = cv2.resize(square, (20, 20), interpolation=cv2.INTER_AREA)
+
+    # Padding till 28x28
     padded = np.zeros((28, 28), dtype=np.uint8)
     padded[4:24, 4:24] = digit_20
 
-    # platta till 784
     flat = padded.astype(np.float32).reshape(1, -1)
     return flat
+
 
 if image is not None:
     st.subheader("Input")
