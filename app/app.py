@@ -28,14 +28,14 @@ else:
     MODEL_PATH = BASE_DIR / "models" / "SVC_model.pkl"
 
 st.write("sökväg", MODEL_PATH)
-st.write("dinns titeln?", MODEL_PATH.exists())
+st.write("Finns titeln?", MODEL_PATH.exists())
 
-# skapa en funktioner för laddning av modell
-@st.cache_resource
+# skapa en funktion för laddning av modell
+@st.cache_resource # den här ser till att jag itne behöver läsa in modellen varje gång. 
 def load_model(path):
     return joblib.load(str(path))
 
-#
+# felmeddelande om modellen itne kan laddas.
 try:
     model = load_model(MODEL_PATH)
 except Exception as e:
@@ -69,6 +69,12 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
     pil_grey = ImageOps.grayscale(pil_img)
     img = np.array(pil_grey)
 
+    H, W = img.shape[:2]
+    max_side = 900
+    if max(H, W) > max_side:
+        scale = max_side / max(H, W)
+        img = cv2.resize(img, (int(W * scale), int(H * scale)), interpolation=cv2.INTER_AREA)
+
     img_blur = cv2.GaussianBlur(img, (5, 5), 0)
     kernel = np.ones((3, 3), np.uint8)
 
@@ -101,6 +107,14 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
         th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
         th = cv2.dilate(th, kernel, iterations=2)
 
+    th_celan = th.copy()
+    h, w = th_celan.shape
+    mask = np.zeros((h + 2, w +2), np.uint8)
+    cv2.floodFill(th, mask, (0, 0), 0)
+    cv2.floodFill(th, mask, (w-1, 0), 0)
+    cv2.floodFill(th, mask, (0, h-1), 0)
+    cv2.floodFill(th, mask, (w-1, h-1), 0)
+    th = th_celan
 
     # hitta konturer
     contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
