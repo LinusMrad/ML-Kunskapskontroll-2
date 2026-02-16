@@ -62,70 +62,45 @@ if img_file is not None:
 elif cam is not None:
     image = Image.open(cam)
 
-def remove_ruled_lines(gray: np.ndarray):
-    """Försöker ta bort linjer på linjerat papper
-    reutnerar en bild i gråskala där linjer är dämpade eller borta"""
-
-    # Blur för att minska brus
-    blur = cv2.GaussianBlur(gray, (3, 3), 0)
-
-    # Binär, inverterad ("bläck" blir vitt)
-    th = cv2.adaptiveThreshold(
-        blur, 255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        31, 7
-    )
-
-    # Hitta linjer med morfologi
-    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))
-    h_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, h_kernel, iterations=1)
-
-    # Hitta vertikala linjer
-    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
-    v_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, v_kernel, iterations=1)
-
-    # mask av linjer
-    lines = cv2.bitwise_or(h_lines, v_lines)
-
-    # Ta bort linjer från threshold bild
-    th_no_lines = cv2.bitwise_and(th, cv2.bitwise_not(lines))
-
-    #
-    cleaned = cv2.bitwise_not(th_no_lines)
-    return cleaned
+mode = st.radio("Bildtyp", ["Bas (vanliga foton)", "Linjerat papper"])
 
 # Förbehandling av bilder
-def preprocess_to_mnist(pil_img: Image.Image, mode="Bas (foton)", debug=False):
+def preprocess_to_mnist(pil_img: Image.Image, mode: str):
     pil_grey = ImageOps.grayscale(pil_img)
     img = np.array(pil_grey)
 
-    # blur hjälper mot pappersstruktur
-    img_blur = cv2.GaussianBlur(img, (7, 7), 0)
+    img_blur = cv2.GaussianBlur(img, (5, 5), 0)
+    kernel = np.ones((3, 3), np.uint8)
 
-    # Bas: adaptive threshold (robust för mobilfoto)
-    th = cv2.adaptiveThreshold(
-        img_blur,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        35,
-        15
-    )
+    if mode == "Bas (vanliga foton)":
+        # Otsu för renare bakgrund på vanliga foton
+        _, th = cv2.threshold(
+            img_blur, 0, 255,
+            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
 
-    # Linjerat papper: aggressivare borttagning av horisontella linjer
-    if mode == "Linjerat papper":
-        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (80, 1))
-        h_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, h_kernel, iterations=2)
+        # mild efterbehandling
+        th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
+        th = cv2.dilate(th, kernel, iterations=1)
+
+    else:  # Linjerat papper
+        th = cv2.adaptiveThreshold(
+            img_blur, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            35, 7
+        )
+
+        # dynamisk kernel så den faktiskt hittar linjer i stora bilder
+        W = th.shape[1]
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(50, W // 2), 1))
+        h_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, h_kernel, iterations=1)
         th = cv2.bitwise_and(th, cv2.bitwise_not(h_lines))
 
-    # Rensa prickar + gör streck lite tydligare
-    kernel = np.ones((3, 3), np.uint8)
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
-    th = cv2.dilate(th, kernel, iterations=2)
+        # lite starkare efterbehandling
+        th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
+        th = cv2.dilate(th, kernel, iterations=2)
 
-    if debug:
-        st.image(th, caption="Debug: threshold", clamp=True)
 
     # hitta konturer
     contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -145,7 +120,7 @@ def preprocess_to_mnist(pil_img: Image.Image, mode="Bas (foton)", debug=False):
     y_off = (size - h)//2
     square[y_off:y_off+h, x_off:x_off+w] = digit
 
-    digit_20 = cv2.resize(square, (20, 20), interpolation=cv2.INTER_AREA)
+    digit_20 = cv2.resize(square, (20, 20), interpolation=cv2.INTER_NEAREST)
     padded = np.zeros((28, 28), dtype=np.uint8)
     padded[4:24, 4:24] = digit_20
 
@@ -172,7 +147,7 @@ if image is not None:
     st.subheader("Input")
     st.image(image, caption="Originalbild", use_container_width=True)
 
-    X = preprocess_to_mnist(image)
+    X = preprocess_to_mnist(image, mode)
 
     #Visa hur modellen ser bilden
     st.subheader("Föbehandlad")
