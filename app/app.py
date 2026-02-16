@@ -79,12 +79,12 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
     kernel = np.ones((3, 3), np.uint8)
 
     if mode == "Bas (vanliga foton)":
-        # Otsu för renare bakgrund på vanliga foton
-        _, th = cv2.threshold(
-            img_blur, 0, 255,
-            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-        )
-
+        th = cv2.adaptiveThreshold(
+        img_blur, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        35, 7
+    )
         # mild efterbehandling
         th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
         th = cv2.dilate(th, kernel, iterations=1)
