@@ -96,32 +96,16 @@ def remove_ruled_lines(gray: np.ndarray):
     return cleaned
 
 # Förbehandling av bilder
-def preprocess_to_mnist(pil_img: Image.Image):
-
-    """
-    Gör om bilderna till MNIST input:
-    Konvertera till gråskala
-    Binära
-    hitta siffran, beskär och centrera
-    omformatera till 28 x 28
-    reurenra som array (1, 784) 
-    värdena 0 - 255
-    """
-    # gråskala
+def preprocess_to_mnist(pil_img: Image.Image, mode="Bas (foton)", debug=False):
     pil_grey = ImageOps.grayscale(pil_img)
-    
-    # omvandla till array
     img = np.array(pil_grey)
 
-    # ta bort linjerat papper
-    clean = remove_ruled_lines(img)
+    # blur hjälper mot pappersstruktur
+    img_blur = cv2.GaussianBlur(img, (7, 7), 0)
 
-    #Blur
-    clean = cv2.GaussianBlur(clean, (7, 7), 0)
-
-    # apaptiv threshold. 
+    # Bas: adaptive threshold (robust för mobilfoto)
     th = cv2.adaptiveThreshold(
-        clean,
+        img_blur,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV,
@@ -129,64 +113,59 @@ def preprocess_to_mnist(pil_img: Image.Image):
         15
     )
 
-    # Ta bort prickar
+    # Linjerat papper: aggressivare borttagning av horisontella linjer
+    if mode == "Linjerat papper":
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (80, 1))
+        h_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, h_kernel, iterations=2)
+        th = cv2.bitwise_and(th, cv2.bitwise_not(h_lines))
+
+    # Rensa prickar + gör streck lite tydligare
     kernel = np.ones((3, 3), np.uint8)
     th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
+    th = cv2.dilate(th, kernel, iterations=2)
 
-    # bredda streck
-    th = cv2.dilate(th, kernel, iterations=1)
+    if debug:
+        st.image(th, caption="Debug: threshold", clamp=True)
 
-    # hitta konturerna (Siffran)
+    # hitta konturer
     contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if len(contours) == 0:
         resized = cv2.resize(th, (28, 28), interpolation=cv2.INTER_AREA)
-        flat = resized.astype(np.float32).reshape(1, -1)
-        return flat
+        return resized.astype(np.float32).reshape(1, -1)
 
-    #välj den mest sannolika konturen som är siffran
-    H, W = th.shape[:2]
-    cands = []
-
-    for c in contours:
-        x, y, w, h = cv2.boundingRect(c)
-        area = w * h
-
-        if area < 80:
-            continue
-
-        aspect = w / max(h, 1)
-
-        #filtera bort långsmala linjer
-        if aspect > 6:
-            continue
-
-        #välj kontur nära mitten    
-        cx, cy = x + w/2, y + h/2
-        dist = (cx - W/2)**2 + (cy - H/2)**2
-        cands.append((dist, c))
-
-    # fallback om allt filtrerades bort
-    c = min(cands, key=lambda t: t[0])[1] if cands else max(contours, key=cv2.contourArea)
-
+    # välj största (baseline igen – stabilt när th är bra)
+    c = max(contours, key=cv2.contourArea)
     x, y, w, h = cv2.boundingRect(c)
     digit = th[y:y+h, x:x+w]
 
-    # Gör bilden kvadratisk
+    # kvadrat + resize + padding
     size = max(w, h)
     square = np.zeros((size, size), dtype=np.uint8)
     x_off = (size - w)//2
     y_off = (size - h)//2
     square[y_off:y_off+h, x_off:x_off+w] = digit
 
-    # Resize till 20x20
     digit_20 = cv2.resize(square, (20, 20), interpolation=cv2.INTER_AREA)
-
-    # Padding till 28x28
     padded = np.zeros((28, 28), dtype=np.uint8)
     padded[4:24, 4:24] = digit_20
 
-    flat = padded.astype(np.float32).reshape(1, -1)
-    return flat
+    #Centre of mass centrering
+    coords = np.column_stack(np.where(padded > 0))
+
+    if len(coords) > 0:
+        cy, cx = coords.mean(axis=0)
+
+        shift_x = int(np.round(14 - cx))
+        shift_y = int(np.round(14 - cy))
+
+        M = np.float32([[1, 0, shift_x],
+                        [0, 1, shift_y]])
+        
+        padded = cv2.warpAffine(padded, M, (28, 28))
+
+
+    return padded.astype(np.float32).reshape(1, -1)
+
 
 
 if image is not None:
