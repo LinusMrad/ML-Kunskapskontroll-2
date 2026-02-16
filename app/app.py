@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image, ImageOps
 import cv2
 from pathlib import Path
+import pandas as pd
 
 # Skapa en första sida
 st.set_page_config(page_title="MNIST bildigenkänning", layout="centered")
@@ -42,21 +43,47 @@ except Exception as e:
     st.stop()
 
 # Skapa input
-img_choice = st.selectbox(
+img_file = None
+cam = None
+
+img_choice = st.radio(
     "Välj metod",
-    ["Ladda upp en bild", "Ta en bild"]
+    ["📁 Ladda upp en bild", "📷 Ta en bild"]
 )
 
-if img_choice == "Ladda upp bild":
-    img_file = st.file_uploader("LAdda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
+if img_choice == "📁 Ladda upp en bild":
+    img_file = st.file_uploader("Ladda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
 else:    
-    cam = st.camera_input("Eller ta en bild med kameran")
+    cam = st.camera_input("Ta en bild med kameran")
 
 image = None
 if img_file is not None:
     image = Image.open(img_file)
 elif cam is not None:
     image = Image.open(cam)
+
+def remove_ruled_lines(gray: np.ndarray):
+    """Försöker ta bort linjer på linjerat papper
+    reutnerar en bild i gråskala där linjer är dämpade eller borta"""
+
+    # Blur för att minska brus
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+
+    # Binär, inverterad ("bläck" blir vitt)
+    th = cv2.adaptiveThreshold(
+        blur, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        31, 7
+    )
+
+    # Hitta linjer med morfologi
+    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))
+    h_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, h_kernel, iterations=1)
+
+    # Hitta vertikala linjer
+    v_kernel = h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 25))
+    v_lines = cv2.morphologyEx(th)
 
 # Förbehandling av bilder
 def preprocess_to_mnist(pil_img: Image.Image):
@@ -91,6 +118,7 @@ def preprocess_to_mnist(pil_img: Image.Image):
     if len(contours) == 0:
         resized = cv2.resize(th, (28, 28), interpolation=cv2.INTER_AREA)
         flat = resized.astype(np.float32).reshape(1, -1)
+        return flat
 
     # största konturen antas vara siffran
     c = max(contours, key=cv2.contourArea)
@@ -127,8 +155,6 @@ if image is not None:
     # Prediktion
     pred = model.predict(X)[0]
     st.success(f"predikterad siffra: **{pred}**")
-
-    import pandas as pd
 
     st.subheader("Modellens säkerhet (Top 3)")
 
@@ -168,6 +194,9 @@ if image is not None:
         st.markdown(
             f"### Mest sannolik: **{best_class}** ({best_prob:.1f}%)"
         )
+
+        st.caption("För SVC utan probability=True visas en normaliserad 'säkerhet' baserad på decision_function (inte en kalibrerad sannolikhet).")
+
 
     else:
         st.info("Modellen stödjer inte sannolikhetsvisning.")
