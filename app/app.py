@@ -23,9 +23,9 @@ model_choice = st.selectbox(
 )
 
 if model_choice == "Extra Trees":
-    MODEL_PATH = BASE_DIR / "models" / "Extra_trees_mnist_model.pkl"
+    MODEL_PATH = BASE_DIR / "models" / "EXT_produktion.pkl"
 else:
-    MODEL_PATH = BASE_DIR / "models" / "SVC_model.pkl"
+    MODEL_PATH = BASE_DIR / "models" / "SVC_produktion.pkl"
 
 st.write("sökväg", MODEL_PATH)
 st.write("Finns titeln?", MODEL_PATH.exists())
