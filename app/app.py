@@ -129,12 +129,11 @@ def get_probs(model, X):
     if hasattr(model, "decision_function"):
         try:
             scores = model.decision_function(X)
-            scores = np.asarray(scores)
-            scores = scores.reshape(-1)
+            scores = np.asarray(scores).reshape(-1)
             if scores.shape[0] != 10:
                 return None
             scores = scores - np.max(scores)
-            exp_scores = np.max(scores)
+            exp_scores = np.exp(scores)
             p = exp_scores / np.sum(exp_scores)
             return p
         except Exception:
@@ -142,6 +141,9 @@ def get_probs(model, X):
     
     return None
 
+#==============================================
+#------------- Hämta modeller------------------
+#==============================================
 
 # Skapa en första sida
 st.set_page_config(page_title="MNIST bildigenkänning", layout="centered")
@@ -170,6 +172,10 @@ except Exception as e:
     st.error(f"Kunde inte ladda modell: {e}")
     st.stop()
 
+#==============================================
+#------------- Skapa input --------------------
+#==============================================
+
 
 # Huvudflöde med bildhantering. uppladning/ta en bild/rita själv
 st.markdown("---")
@@ -183,6 +189,7 @@ input_choice = st.radio(
 # Skapa input
 img_file = None
 cam = None
+image = None
 
 if input_choice == "📁 Ladda upp en bild":
     img_file = st.file_uploader("Ladda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
@@ -208,23 +215,25 @@ elif input_choice == "Rita själv":
             mode="RGBA"
         ).convert("RGB")
     else:
-        image = None
         st.info("Rita en siffra")
 
-image = None
-if img_file is not None:
-    image = Image.open(img_file)
-elif cam is not None:
-    image = Image.open(cam)
+if image is None:
+    if img_file is not None:
+        image = Image.open(img_file)
+    elif cam is not None:
+        image = Image.open(cam)
 
-mode = st.radio("Bildtyp", ["Bas (vanliga foton)", "Linjerat papper"])
+if input_choice == "Rita själv":
+    effective_mode = "Bas (vanliga foton)"
+else:
+    effective_mode = st.radio("Bildtyp", ["Bas (vanliga foton)", "Linjerat papper"])
 
 
 if image is not None:
     st.subheader("Input")
     st.image(image, caption="Originalbild", use_container_width=True)
 
-    X = preprocess_to_mnist(image, mode)
+    X = preprocess_to_mnist(image, effective_mode)
 
     #Visa hur modellen ser bilden
     st.subheader("Föbehandlad")
