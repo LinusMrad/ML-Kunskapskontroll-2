@@ -6,65 +6,11 @@ from PIL import Image, ImageOps
 import cv2
 from pathlib import Path
 import pandas as pd
-
-# Skapa en första sida
-st.set_page_config(page_title="MNIST bildigenkänning", layout="centered")
-
-# sätt titel
-st.title("MNIST känn igen siffror")
-st.write("Ladda upp en bild eller ta en ny bild")
-
-#ladda in modellen Extra Trees
-BASE_DIR = Path(__file__).resolve().parents[1]
-
-model_choice = st.selectbox(
-    "Välj modell",
-    ["Extra Trees", "SVC"]
-)
-
-if model_choice == "Extra Trees":
-    MODEL_PATH = BASE_DIR / "models" / "EXT_produktion.pkl"
-else:
-    MODEL_PATH = BASE_DIR / "models" / "SVC_produktion.pkl"
-
-st.write("sökväg", MODEL_PATH)
-st.write("Finns titeln?", MODEL_PATH.exists())
-
-# skapa en funktion för laddning av modell
-@st.cache_resource # den här ser till att jag itne behöver läsa in modellen varje gång. 
-def load_model(path):
-    return joblib.load(str(path))
-
-# felmeddelande om modellen itne kan laddas.
-try:
-    model = load_model(MODEL_PATH)
-except Exception as e:
-    st.error(f"Kunde inte ladda modell: {e}")
-    st.stop()
-
-# Skapa input
-img_file = None
-cam = None
-
-img_choice = st.radio(
-    "Välj metod",
-    ["📁 Ladda upp en bild", "📷 Ta en bild"]
-)
-
-if img_choice == "📁 Ladda upp en bild":
-    img_file = st.file_uploader("Ladda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
-else:    
-    cam = st.camera_input("Ta en bild med kameran")
-
-image = None
-if img_file is not None:
-    image = Image.open(img_file)
-elif cam is not None:
-    image = Image.open(cam)
-
-mode = st.radio("Bildtyp", ["Bas (vanliga foton)", "Linjerat papper"])
-
-# Förbehandling av bilder
+from streamlit_drawable_canvas import st_canvas
+#==========================================
+# --------------- Funktioner---------------
+#==========================================
+# Funktion för förbehandling av bilder
 def preprocess_to_mnist(pil_img: Image.Image, mode: str):
     pil_grey = ImageOps.grayscale(pil_img)
     img = np.array(pil_grey)
@@ -165,6 +111,113 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
 
     return padded.astype(np.float32).reshape(1, -1)
 
+# Funmktion för att visa sannolikheten som modellerna gissar på siffran
+# predict_proba för Extra tress och decision_function + softmax för SVC utan probabnility=True
+def get_probs(model, X):
+    #Riktiga sannolikheter
+    if hasattr(model, "predict_proba"):
+        try:
+            p = model.predict_proba(X)
+            p = np.asarray(p)
+            if p.ndim == 2:
+                p = p[0]
+                return p
+        except Exception:
+            pass
+    
+    # Softmax
+    if hasattr(model, "decision_function"):
+        try:
+            scores = model.decision_function(X)
+            scores = np.asarray(scores)
+            scores = scores.reshape(-1)
+            if scores.shape[0] != 10:
+                return None
+            scores = scores - np.max(scores)
+            exp_scores = np.max(scores)
+            p = exp_scores / np.sum(exp_scores)
+            return p
+        except Exception:
+            pass
+    
+    return None
+
+
+# Skapa en första sida
+st.set_page_config(page_title="MNIST bildigenkänning", layout="centered")
+
+# sätt titel
+st.title("MNIST känn igen siffror")
+
+
+# Sökvägen för modellerna
+BASE_DIR = Path(__file__).resolve().parents[1]
+
+# Modelfilerna
+EXT_PATH = BASE_DIR / "models" / "EXT_produktion.pkl"
+SVC_PATH = BASE_DIR / "models" / "SVC_produktion.pkl"
+
+# skapa en funktion för laddning av modell
+@st.cache_resource # den här ser till att jag itne behöver läsa in modellen varje gång. 
+def load_model(path):
+    return joblib.load(str(path))
+
+# felmeddelande om modellen itne kan laddas.
+try:
+    ext_model = load_model(EXT_PATH)
+    svc_model = load_model(SVC_PATH)
+except Exception as e:
+    st.error(f"Kunde inte ladda modell: {e}")
+    st.stop()
+
+
+# Huvudflöde med bildhantering. uppladning/ta en bild/rita själv
+st.markdown("---")
+st.header("Välj hur du vill mata in en siffra")
+
+input_choice = st.radio(
+    "Välj metod",
+    ["Rita själv", "📁 Ladda upp en bild", "📷 Ta en bild"]
+)
+
+# Skapa input
+img_file = None
+cam = None
+
+if input_choice == "📁 Ladda upp en bild":
+    img_file = st.file_uploader("Ladda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
+elif input_choice == "📷 Ta en bild":    
+    cam = st.camera_input("Ta en bild med kameran")
+elif input_choice == "Rita själv":
+    st.subheader("Rita din siffra")
+
+    canvas_result = st_canvas(
+        fill_color="rgba(0, 0, 0, 0)",
+        stroke_width=18,
+        stroke_color="#FFFFFF",
+        background_color="#000000",
+        height=280,
+        width=280,
+        drawing_mode="freedraw",
+        key="canvas"
+    )
+
+    if canvas_result.image_data is not None and np.any(canvas_result.image_data[:, :, 3] > 0):
+        image = Image.fromarray(
+            canvas_result.image_data.astype("uint8"),
+            mode="RGBA"
+        ).convert("RGB")
+    else:
+        image = None
+        st.info("Rita en siffra")
+
+image = None
+if img_file is not None:
+    image = Image.open(img_file)
+elif cam is not None:
+    image = Image.open(cam)
+
+mode = st.radio("Bildtyp", ["Bas (vanliga foton)", "Linjerat papper"])
 
 
 if image is not None:
@@ -179,50 +232,44 @@ if image is not None:
     st.image(preview, caption="MNIST-format (vit siffra på svart bakgrund)", use_column_width=False)
 
     # Prediktion
-    pred = model.predict(X)[0]
-    st.success(f"predikterad siffra: **{pred}**")
+    pred_ext = ext_model.predict(X)[0]
+    pred_svc = svc_model.predict(X)[0]
+    #st.success(f"predikterad siffra: **{pred}**")
 
-    st.subheader("Modellens säkerhet (Top 3)")
+    st.subheader("Modelljämförelse")
+    c1, c2 = st.columns(2)
 
-    probs = None
+    with c1:
+        st.metric("Extra Trees", int(pred_ext))
+    with c2:
+        st.metric("SVC", int(pred_svc))
 
-    # 1️⃣ Om modellen har riktiga sannolikheter
-    if hasattr(model, "predict_proba"):
-        probs = model.predict_proba(X)[0]
+    if pred_ext != pred_svc:
+        st.warning("Modellerna är inte överens")
 
-    # 2️⃣ Om SVC utan probability=True
-    elif hasattr(model, "decision_function"):
-        scores = model.decision_function(X)
-        scores = np.ravel(scores)
+    st.subheader("Moddelernas säkerhet(top 3)")
 
-        # stabil softmax
-        scores = scores - np.max(scores)
-        exp_scores = np.exp(scores)
-        probs = exp_scores / np.sum(exp_scores)
+    p_ext = get_probs(ext_model, X)
+    p_svc = get_probs(svc_model, X)
 
-    if probs is not None:
-        # skapa pandas-serie med etiketter 0–9
-        probs_series = pd.Series(probs, index=list(range(10)))
+    c1, c2 = st.columns(2)
 
-        # sortera och ta topp 3
-        top3 = probs_series.sort_values(ascending=False).head(3)
-
-        # konvertera till procent
-        top3_percent = top3 * 100
-
-        # visa stapeldiagram
-        st.bar_chart(top3_percent)
-
-        # visa tydlig text
-        best_class = top3.index[0]
-        best_prob = top3_percent.iloc[0]
-
-        st.markdown(
-            f"### Mest sannolik: **{best_class}** ({best_prob:.1f}%)"
-        )
-
-        st.caption("För SVC utan probability=True visas en normaliserad 'säkerhet' baserad på decision_function (inte en kalibrerad sannolikhet).")
-
-
-    else:
-        st.info("Modellen stödjer inte sannolikhetsvisning.")
+    with c1:
+        st.markdown("**Extra Trees**")
+        if p_ext is not None:
+            s = pd.Series(p_ext, index=list(range(10)))
+            s = s.sort_values(ascending=False).head(3) * 100
+            st.bar_chart(s)
+            st.caption(f"Mest sannolik: {int(s.index[0])} ({s.iloc[0]:.1f}%)")
+        else:
+            st.info("Ingen sannolikhetsvisning.")
+    
+    with c2:
+        st.markdown("**SVC**")
+        if p_svc is not None:
+            s = pd.Series(p_svc, index=list(range(10)))
+            s = s.sort_values(ascending=False).head(3) * 100
+            st.bar_chart(s)
+            st.caption(f"Mest sannolik: {int(s.index[0])} ({s.iloc[0]:.1f}%)")
+        else:
+            st.info("Ingen sannolikhetsvisning.")
