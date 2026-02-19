@@ -273,7 +273,7 @@ with left:
                 image = Image.fromarray(rgba, mode="RGBA").convert("RGB")
             else:
                 image = None
-                st.info("Rita en siffra")
+                st.info("🎨 Rita en siffra")
 
 if image is None:
     if img_file is not None:
