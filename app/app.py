@@ -10,7 +10,8 @@ from streamlit_drawable_canvas import st_canvas
 #==========================================
 # --------------- Funktioner---------------
 #==========================================
-# Funktion för förbehandling av bilder
+
+# Funktion för förbehandling av bilder till MNIST-format
 def preprocess_to_mnist(pil_img: Image.Image, mode: str):
     pil_grey = ImageOps.grayscale(pil_img)
     img = np.array(pil_grey)
@@ -21,17 +22,27 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
         scale = max_side / max(H, W)
         img = cv2.resize(img, (int(W * scale), int(H * scale)), interpolation=cv2.INTER_AREA)
 
+    Clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    img = Clahe.apply(img)
+
+    if np.mean(img) < 80:
+        img = 255 - img
+
     img_blur = cv2.GaussianBlur(img, (5, 5), 0)
     kernel = np.ones((3, 3), np.uint8)
+
+    block = max(35, (min(img.shape) // 20) | 1)
+    C = 7
 
     if mode == "Bas (vanliga foton)":
         th = cv2.adaptiveThreshold(
         img_blur, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV,
-        35, 7
+        block, C
     )
         # mild efterbehandling
+        th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
         th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
         th = cv2.dilate(th, kernel, iterations=1)
 
@@ -40,37 +51,32 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
             img_blur, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV,
-            35, 7
+            block, C
         )
-        """
-        Behåll för att testa senare. 
+
+        #Hough för att hitta linjer och maskera
         W = th.shape[1]
-        k = max(25, min(80, W // 25))   # typ W/25 men clampad mellan 25 och 80
+        lines = cv2.HoughLinesP(th, 1, np.pi/180, threshold=150, minLineLength=W//3, maxLineGap=30)
+        line_mask = np.zeros_like(th)
+        if lines is not None:
+            for l in lines:
+                x1, y1, x2, y2 = l[0]
+                if abs(y2 -y1) < 15:
+                    cv2.line(line_mask, (x1, y1), (x2, y2), 255, 8)
+        th = cv2.bitwise_and(th, cv2.bitwise_not(line_mask))
 
-        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, 1))
-        h_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, h_kernel, iterations=1)
-
-        th = cv2.bitwise_and(th, cv2.bitwise_not(h_lines))
-        """
-
-        # dynamisk kernel så den faktiskt hittar linjer i stora bilder
-        W = th.shape[1]
-        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(50, W // 2), 1))
-        h_lines = cv2.morphologyEx(th, cv2.MORPH_OPEN, h_kernel, iterations=1)
-        th = cv2.bitwise_and(th, cv2.bitwise_not(h_lines))
-
-        # lite starkare efterbehandling
-        th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
+        # Efterbehandling för att försöka hitta där linjerna skär genom isffran och fylla igen.
+        th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=2)
         th = cv2.dilate(th, kernel, iterations=2)
 
-    th_celan = th.copy()
-    h, w = th_celan.shape
+    th_clean = th.copy()
+    h, w = th_clean.shape
     mask = np.zeros((h + 2, w +2), np.uint8)
     cv2.floodFill(th, mask, (0, 0), 0)
     cv2.floodFill(th, mask, (w-1, 0), 0)
     cv2.floodFill(th, mask, (0, h-1), 0)
     cv2.floodFill(th, mask, (w-1, h-1), 0)
-    th = th_celan
+    th = th_clean
 
     # hitta konturer
     contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -78,9 +84,43 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
         resized = cv2.resize(th, (28, 28), interpolation=cv2.INTER_AREA)
         return resized.astype(np.float32).reshape(1, -1)
 
-    # välj största (baseline igen – stabilt när th är bra)
-    c = max(contours, key=cv2.contourArea)
-    x, y, w, h = cv2.boundingRect(c)
+    img_h, img_w = th.shape
+    total_area = img_h * img_w
+
+    valid = []
+    for c in contours:
+        x, y, w, h = cv2.boundingRect(c)
+        area = cv2.contourArea(c)
+        aspect = w / max(h, 1)
+
+        if area < 500: continue # hanterar litet brus
+        if area > total_area * 0.3: continue # stor bakgrund = bakgrund/skugga
+        if aspect > 5: continue # för platt = horisontell skuggkant
+        if y < img_h * 0.1: continue # för nära toppen = skuggkant
+        valid.append(c)
+
+    if valid:
+        if mode == "Linjerat papper":
+            # Hitta den största konturen som referens
+            main = max(valid, key=cv2.contourArea)
+            mx, my, mw, mh = cv2.boundingRect(main)
+            
+            # Inkludera bara konturer som överlappar eller är nära huvudkonturen
+            nearby = []
+            for c in valid:
+                x, y, w, h = cv2.boundingRect(c)
+                # Konturen måste vara inom 1.5x huvudkonturens höjd
+                if y < my + mh * 1.5 and y + h > my - mh * 0.5:
+                    nearby.append(c)
+            
+            all_points = np.vstack(nearby)
+            x, y, w, h = cv2.boundingRect(all_points)
+        else:
+            c = max(valid, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(c)
+    else:
+        c = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(c)
     digit = th[y:y+h, x:x+w]
 
     # kvadrat + resize + padding
@@ -90,7 +130,7 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
     y_off = (size - h)//2
     square[y_off:y_off+h, x_off:x_off+w] = digit
 
-    digit_20 = cv2.resize(square, (20, 20), interpolation=cv2.INTER_NEAREST)
+    digit_20 = cv2.resize(square, (20, 20), interpolation=cv2.INTER_AREA)
     padded = np.zeros((28, 28), dtype=np.uint8)
     padded[4:24, 4:24] = digit_20
 
@@ -112,7 +152,6 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: str):
     return padded.astype(np.float32).reshape(1, -1)
 
 # Funmktion för att visa sannolikheten som modellerna gissar på siffran
-# predict_proba för Extra tress och decision_function + softmax för SVC utan probabnility=True
 def get_probs(model, X):
     #Riktiga sannolikheter
     if hasattr(model, "predict_proba"):
@@ -124,21 +163,7 @@ def get_probs(model, X):
                 return p
         except Exception:
             pass
-    
-    # Softmax
-    if hasattr(model, "decision_function"):
-        try:
-            scores = model.decision_function(X)
-            scores = np.asarray(scores).reshape(-1)
-            if scores.shape[0] != 10:
-                return None
-            scores = scores - np.max(scores)
-            exp_scores = np.exp(scores)
-            p = exp_scores / np.sum(exp_scores)
-            return p
-        except Exception:
-            pass
-    
+        
     return None
 
 #==============================================
@@ -201,8 +226,8 @@ elif input_choice == "Rita själv":
     canvas_result = st_canvas(
         fill_color="rgba(0, 0, 0, 0)",
         stroke_width=18,
-        stroke_color="#FFFFFF",
-        background_color="#000000",
+        stroke_color="#000000",
+        background_color="#FFFFFF",
         height=280,
         width=280,
         drawing_mode="freedraw",
@@ -236,7 +261,7 @@ if image is not None:
     X = preprocess_to_mnist(image, effective_mode)
 
     #Visa hur modellen ser bilden
-    st.subheader("Föbehandlad")
+    st.subheader("Förbehandlad")
     preview = X.reshape(28, 28).astype(np.uint8)
     st.image(preview, caption="MNIST-format (vit siffra på svart bakgrund)", use_column_width=False)
 
