@@ -236,6 +236,7 @@ input_choice = st.radio(
 img_file = None
 cam = None
 image = None
+predict_clicked = st.button("🔍 Prediktera")
 
 #layout för input/resultat
 left, right = st.columns([1, 1])
@@ -294,6 +295,8 @@ with right:
     st.subheader("Resultat")
     if image is None:
         st.info("Välj en metod och ge en bild/siffra")
+        st.stop()
+    if not predict_clicked:
         st.stop()
 
 # Visa input i vänsterkolumnen
