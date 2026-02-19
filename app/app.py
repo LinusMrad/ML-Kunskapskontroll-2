@@ -167,15 +167,20 @@ def get_probs(model, X):
     return None
 
 #==============================================
-#------------- Hämta modeller------------------
+#------------- Ui: Layout ------------------
 #==============================================
 
 # Skapa en första sida
-st.set_page_config(page_title="MNIST bildigenkänning", layout="centered")
+st.set_page_config(page_title="MNIST känn igen siffror", layout="centered")
+
 
 # sätt titel
 st.title("MNIST känn igen siffror")
+st.caption("Jämförelse mellan Extra Trees och SVC på MNIST")
 
+#==============================================
+#------------- Hämta modeller------------------
+#==============================================
 
 # Sökvägen för modellerna
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -198,49 +203,77 @@ except Exception as e:
     st.stop()
 
 #==============================================
+#------------- Sidebar -----------------------
+#==============================================
+
+with st.sidebar:
+    st.header("⚙️ Inställningar")
+    show_debug = st.checkbox("Visa tekniska detaljer (debug)", value=False)
+    conf_threshold = st.slider("Osäkerhetsgräns (%)", 30, 90, 60, 5)
+
+    mode_choice = st.radio("bildtyp", ["Bas (Vanliga foton)", "Linjerat papper"])
+
+
+
+#==============================================
 #------------- Skapa input --------------------
 #==============================================
 
 
 # Huvudflöde med bildhantering. uppladning/ta en bild/rita själv
 st.markdown("---")
-st.header("Välj hur du vill mata in en siffra")
+st.header("Input")
+
+if "canvas_key" not in st.session_state:
+    st.session_state.canvas_key = "canvas_0"
 
 input_choice = st.radio(
     "Välj metod",
-    ["Rita själv", "📁 Ladda upp en bild", "📷 Ta en bild"]
+    ["🎨 Rita själv", "📁 Ladda upp en bild", "📷 Ta en bild"],
+    horizontal=True
 )
 
-# Skapa input
 img_file = None
 cam = None
 image = None
 
-if input_choice == "📁 Ladda upp en bild":
-    img_file = st.file_uploader("Ladda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
-elif input_choice == "📷 Ta en bild":    
-    cam = st.camera_input("Ta en bild med kameran")
-elif input_choice == "Rita själv":
-    st.subheader("Rita din siffra")
+#layout för input/resultat
+left, right = st.columns([1, 1])
 
-    canvas_result = st_canvas(
-        fill_color="rgba(0, 0, 0, 0)",
-        stroke_width=18,
-        stroke_color="#000000",
-        background_color="#FFFFFF",
-        height=280,
-        width=280,
-        drawing_mode="freedraw",
-        key="canvas"
-    )
+with left:
+    if input_choice == "📁 Ladda upp en bild":
+        img_file = st.file_uploader("Ladda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
+    elif input_choice == "📷 Ta en bild":    
+        cam = st.camera_input("Ta en bild med kameran")
+    elif input_choice == "🎨 Rita själv":
+        st.subheader("🎨 Rita din siffra")
 
-    if canvas_result.image_data is not None and np.any(canvas_result.image_data[:, :, 3] > 0):
-        image = Image.fromarray(
-            canvas_result.image_data.astype("uint8"),
-            mode="RGBA"
-        ).convert("RGB")
-    else:
-        st.info("Rita en siffra")
+        cbtn1, cbtn2 = st.columns([1, 2])
+        with cbtn1:
+            if st.button("🧽 Rensa"):
+                st.session_state.canvas_key = f"canvas_{np.random.randint(1_000_000)}"
+        
+        canvas_result = st_canvas(
+            fill_color="rgba(0, 0, 0, 0)",
+            stroke_width=18,
+            stroke_color="#000000",
+            background_color="#FFFFFF",
+            height=280,
+            width=280,
+            drawing_mode="freedraw",
+            key=st.session_state.canvas_key
+        )
+
+        if canvas_result.image_data is not None:
+            rgba = canvas_result.image_data.astype("uint8")
+            rgb = rgba[:, :, :3]
+            ink = np.any(np.min(rgb, axis=2) <200)
+
+            if ink:
+                image = Image.fromarray(rgba, mode="RGBA").convert("RGB")
+            else:
+                image = None
+                st.info("Rita en siffra")
 
 if image is None:
     if img_file is not None:
@@ -248,62 +281,85 @@ if image is None:
     elif cam is not None:
         image = Image.open(cam)
 
-if input_choice == "Rita själv":
+if input_choice == "🎨 Rita själv":
     effective_mode = "Bas (vanliga foton)"
 else:
-    effective_mode = st.radio("Bildtyp", ["Bas (vanliga foton)", "Linjerat papper"])
+    effective_mode = mode_choice
 
+#==============================================
+#------------- prediktion + UI ----------------
+#==============================================
 
-if image is not None:
-    st.subheader("Input")
+with right:
+    st.subheader("Resultat")
+    if image is None:
+        st.info("Välj en metod och ge en bild/siffra")
+        st.stop()
+
+# Visa input i vänsterkolumnen
+with left:
+    st.subheader("Förhandsvisning")
     st.image(image, caption="Originalbild", use_container_width=True)
 
+    # Preprocess och predict
     X = preprocess_to_mnist(image, effective_mode)
 
-    #Visa hur modellen ser bilden
-    st.subheader("Förbehandlad")
-    preview = X.reshape(28, 28).astype(np.uint8)
-    st.image(preview, caption="MNIST-format (vit siffra på svart bakgrund)", use_column_width=False)
 
     # Prediktion
     pred_ext = ext_model.predict(X)[0]
     pred_svc = svc_model.predict(X)[0]
     #st.success(f"predikterad siffra: **{pred}**")
 
-    st.subheader("Modelljämförelse")
-    c1, c2 = st.columns(2)
-
-    with c1:
-        st.metric("Extra Trees", int(pred_ext))
-    with c2:
-        st.metric("SVC", int(pred_svc))
-
-    if pred_ext != pred_svc:
-        st.warning("Modellerna är inte överens")
-
-    st.subheader("Moddelernas säkerhet(top 3)")
-
     p_ext = get_probs(ext_model, X)
     p_svc = get_probs(svc_model, X)
 
-    c1, c2 = st.columns(2)
+    # Resultat UI
+with right:
+    # Status: överens/inte
+    if pred_ext != pred_svc:
+        st.error("⚠️ Modellerna är inte överens")
+    else:
+        st.success("✅ Modellerna är överens")
 
-    with c1:
+    st.markdown("### Modelljämförelse")
+    m1, m2 = st.columns(2)
+    with m1:
+        st.metric("Extra Trees", int(pred_ext))
+    with m2:
+        st.metric("SVC", int(pred_svc))
+
+    # Osäkerhetsvarning (prioritera SVC om den finns, annars EXT)
+    primary_probs = p_svc if p_svc is not None else p_ext
+    if primary_probs is not None:
+        max_prob = float(np.max(primary_probs))
+        if max_prob < (conf_threshold / 100.0):
+            st.warning(f"Osäker prediktion ({max_prob*100:.1f}%). Testa bättre ljus / zooma in.")
+
+    st.markdown("### Modellernas säkerhet (Top 3)")
+    b1, b2 = st.columns(2)
+
+    with b1:
         st.markdown("**Extra Trees**")
         if p_ext is not None:
-            s = pd.Series(p_ext, index=list(range(10)))
-            s = s.sort_values(ascending=False).head(3) * 100
+            s = pd.Series(p_ext, index=list(range(10))).sort_values(ascending=False).head(3) * 100
             st.bar_chart(s)
             st.caption(f"Mest sannolik: {int(s.index[0])} ({s.iloc[0]:.1f}%)")
         else:
             st.info("Ingen sannolikhetsvisning.")
-    
-    with c2:
+
+    with b2:
         st.markdown("**SVC**")
         if p_svc is not None:
-            s = pd.Series(p_svc, index=list(range(10)))
-            s = s.sort_values(ascending=False).head(3) * 100
+            s = pd.Series(p_svc, index=list(range(10))).sort_values(ascending=False).head(3) * 100
             st.bar_chart(s)
             st.caption(f"Mest sannolik: {int(s.index[0])} ({s.iloc[0]:.1f}%)")
         else:
             st.info("Ingen sannolikhetsvisning.")
+
+    # Debug expander
+    if show_debug:
+        with st.expander("Visa tekniska detaljer (debug)"):
+            preview = X.reshape(28, 28).astype(np.uint8)
+            st.image(preview, caption="Förbehandlad 28x28", width=200)
+            st.write("Effective mode:", effective_mode)
+            st.write("Input method:", input_choice)
