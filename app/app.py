@@ -211,7 +211,7 @@ with st.sidebar:
     show_debug = st.checkbox("Visa tekniska detaljer (debug)", value=False)
     conf_threshold = st.slider("Osäkerhetsgräns (%)", 30, 90, 60, 5)
 
-    mode_choice = st.radio("bildtyp", ["Bas (Vanliga foton)", "Linjerat papper"])
+    mode_choice = st.radio("bildtyp", ["Bas (vanliga foton)", "Linjerat papper"])
 
 
 
