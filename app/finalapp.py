@@ -19,13 +19,15 @@ import cv2
 from pathlib import Path
 import pandas as pd
 from streamlit_drawable_canvas import st_canvas
+
 #==========================================
 # --------------- Konstanter---------------
 #==========================================
-""" här samlar jag alla tal som används
-i appen för att senare använda som variabler, det underlättar konfigueringen
-"""
-mode = Literal["Bas (vanliga foton)", "Linjerat papper"]
+ 
+# här samlar jag alla tal som används
+# i appen för att senare använda som variabler, det underlättar konfigueringen
+
+Mode = Literal["Bas (vanliga foton)", "Linjerat papper"]
 
 max_side_px = 900
 
@@ -35,7 +37,7 @@ clahe_tile_grid = (8, 8)
 dark_image_mean_threshold = 80 # om bilden är väldigt mörk inverteras den.
 
 gauss_kernel = (5, 5)
-morph_kernel = np.ones((3, 3), np.uint8)
+morph_kernel = (3, 3)
 
 min_area = 500
 max_area_ratio = 0.30
@@ -53,7 +55,7 @@ canvas_stroke = 18
 #------------- Ladda modeller------------------
 #==============================================
 @st.cache_resource
-def load_model(model_path: Path)
+def load_model(model_path: Path):
     """Laddar en sparad modell från hårddisk (cache för att slippa ladda modellerna varej gång sidan laddas)"""
     return joblib.load(str(model_path))
 
@@ -175,6 +177,9 @@ def find_bounding_box(th: np.ndarray, mode: Mode) -> tuple[int, int, int, int]:
             continue
 
         valid.append(c)
+    
+    #skydda från att krasha om nearby blir tom
+
 
     # Om inget blev "valid" tar vi största konturen att falla tillbaka på
     candidates = valid if valid else contours
@@ -189,6 +194,9 @@ def find_bounding_box(th: np.ndarray, mode: Mode) -> tuple[int, int, int, int]:
             x, y, w, h = cv2.boundingRect(c)
             if y < my + mh * 1.5 and (y + h) > my - mh * 0.5:
                 nearby.append(c)
+        
+        # Säkerhetsfallback: om inga nearby hittas, använd huvudkonturen
+        nearby = nearby if nearby else [main]
 
         all_points = np.vstack(nearby)
         x, y, w, h = cv2.boundingRect(all_points)
@@ -255,5 +263,157 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: Mode) -> np.ndarray:
     return mnist_28.astype(np.float32).reshape(1, -1)
 
 #==============================================
-#------------- Bildbehandlig mnist format------
+#------------- App UI -------------------------
 #==============================================
+
+def main() -> None:
+    """
+    Startpunkt för appen
+    """
+    st.set_page_config(page_title="MNIST känn igen siffror", layout="centered")
+    st.title("MNIST känn igen siffror")
+    st.caption("Jämförelse mellan Extra Trees och SVC på MNIST")
+
+    base_dir = Path(__file__).resolve().parents[1]
+    ext_path = base_dir / "models" / "EXT_produktion.pkl"
+    svc_path = base_dir / "models" / "SVC_produktion.pkl"
+
+    try:
+        ext_model = load_model(ext_path)
+        svc_model = load_model(svc_path)
+    except Exception as e:
+        st.error(f"Kunde inte ladda modell: {e}")
+        st.stop()
+
+    with st.sidebar:
+        st.header("⚙️ Inställningar")
+        show_debug = st.checkbox("Visa tekniska detaljer (debug)", value=False)
+        conf_threshold = st.slider("Osäkerhetsgräns (%)", 30, 90, 60, 5)
+        mode_choice: Mode = st.radio("Bildtyp", ["Bas (vanliga foton)", "Linjerat papper"])
+
+    st.markdown("---")
+    st.header("Input")
+
+    if "canvas_key" not in st.session_state:
+        st.session_state.canvas_key = "canvas_0"
+
+    input_choice = st.radio(
+        "Välj metod",
+        ["🎨 Rita själv", "📁 Ladda upp en bild", "📷 Ta en bild"],
+        horizontal=True,
+    )
+
+    predict_clicked = st.button("🔍 Prediktera")
+    left, right = st.columns([1, 1])
+
+    image: Optional[Image.Image] = None
+
+    with left:
+        if input_choice == "📁 Ladda upp en bild":
+            img_file = st.file_uploader("Ladda upp en bild (png/jpg)", type=["png", "jpg", "jpeg"])
+            if img_file is not None:
+                image = Image.open(img_file)
+
+        elif input_choice == "📷 Ta en bild":
+            cam = st.camera_input("Ta en bild med kameran")
+            if cam is not None:
+                image = Image.open(cam)
+
+        else:
+            st.subheader("🎨 Rita din siffra")
+
+            cbtn1, _ = st.columns([1, 2])
+            with cbtn1:
+                if st.button("🧽 Rensa"):
+                    st.session_state.canvas_key = f"canvas_{np.random.randint(1_000_000)}"
+
+            canvas_result = st_canvas(
+                fill_color="rgba(0, 0, 0, 0)",
+                stroke_width=canvas_stroke,
+                stroke_color="#000000",
+                background_color="#FFFFFF",
+                height=canvas_size,
+                width=canvas_size,
+                drawing_mode="freedraw",
+                key=st.session_state.canvas_key,
+            )
+
+            if canvas_result.image_data is not None:
+                rgba = canvas_result.image_data.astype("uint8")
+                rgb = rgba[:, :, :3]
+                ink = np.any(np.min(rgb, axis=2) < 200)
+
+                if ink:
+                    image = Image.fromarray(rgba, mode="RGBA").convert("RGB")
+                else:
+                    st.info("🎨 Rita en siffra")
+
+    with right:
+        st.subheader("Resultat")
+        if image is None:
+            st.info("Välj en metod och ge en bild/siffra")
+            st.stop()
+        if not predict_clicked:
+            st.stop()
+
+    with left:
+        st.subheader("Förhandsvisning")
+        st.image(image, caption="Originalbild", use_container_width=True)
+
+        effective_mode: Mode = "Bas (vanliga foton)" if input_choice == "🎨 Rita själv" else mode_choice
+        X = preprocess_to_mnist(image, effective_mode)
+
+        pred_ext = int(ext_model.predict(X)[0])
+        pred_svc = int(svc_model.predict(X)[0])
+
+        p_ext = get_probs(ext_model, X)
+        p_svc = get_probs(svc_model, X)
+
+    with right:
+        if pred_ext != pred_svc:
+            st.error("⚠️ Modellerna är inte överens")
+        else:
+            st.success("✅ Modellerna är överens")
+
+        st.markdown("### Modelljämförelse")
+        m1, m2 = st.columns(2)
+        m1.metric("Extra Trees", pred_ext)
+        m2.metric("SVC", pred_svc)
+
+        primary_probs = p_svc if p_svc is not None else p_ext
+        if primary_probs is not None:
+            max_prob = float(np.max(primary_probs))
+            if max_prob < (conf_threshold / 100.0):
+                st.warning(f"Osäker prediktion ({max_prob*100:.1f}%). Testa bättre ljus / zooma in.")
+
+        st.markdown("### Modellernas säkerhet (Top 3)")
+        b1, b2 = st.columns(2)
+
+        with b1:
+            st.markdown("**Extra Trees**")
+            if p_ext is not None:
+                s = pd.Series(p_ext, index=list(range(10))).sort_values(ascending=False).head(3) * 100
+                st.bar_chart(s)
+                st.caption(f"Mest sannolik: {int(s.index[0])} ({s.iloc[0]:.1f}%)")
+            else:
+                st.info("Ingen sannolikhetsvisning.")
+
+        with b2:
+            st.markdown("**SVC**")
+            if p_svc is not None:
+                s = pd.Series(p_svc, index=list(range(10))).sort_values(ascending=False).head(3) * 100
+                st.bar_chart(s)
+                st.caption(f"Mest sannolik: {int(s.index[0])} ({s.iloc[0]:.1f}%)")
+            else:
+                st.info("Ingen sannolikhetsvisning.")
+
+        if show_debug:
+            with st.expander("Visa tekniska detaljer (debug)"):
+                preview = X.reshape(28, 28).astype(np.uint8)
+                st.image(preview, caption="Förbehandlad 28x28", width=200)
+                st.write("Effective mode:", effective_mode)
+                st.write("Input method:", input_choice)
+
+
+if __name__ == "__main__":
+    main()
