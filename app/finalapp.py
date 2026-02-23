@@ -60,7 +60,7 @@ def load_model(model_path: Path):
     return joblib.load(str(model_path))
 
 
-def get_probs(model, X: np.ndarray) -> Optional[np.ndarray]:
+def get_probs(model, X: np.ndarray):
     """
     Returnerar en endimensionel array med sannolikheter om modellen stödjer det.
     """
@@ -79,7 +79,7 @@ def get_probs(model, X: np.ndarray) -> Optional[np.ndarray]:
 #------------- Bildbehandlig mnist format------
 #==============================================
 
-def resize(grey: np.ndarray, max_side: int = max_side_px) -> np.ndarray:
+def resize(grey: np.ndarray, max_side: int = max_side_px):
     """
     Skala stora bilder för stabilare och snabbare app
     """
@@ -99,7 +99,7 @@ def apply_clahe(grey: np.ndarray) -> np.ndarray:
     clahe = cv2.createCLAHE(clipLimit=clahe_clip_limit, tileGridSize=clahe_tile_grid)
     return clahe.apply(grey)
 
-def adaptive_threshold(grey_blur: np.ndarray) -> np.ndarray:
+def adaptive_threshold(grey_blur: np.ndarray):
     """
     Adaptiv tröskling och dynamisk blockstorlek för att fungera på olika upplösningar.
     """
@@ -114,7 +114,7 @@ def adaptive_threshold(grey_blur: np.ndarray) -> np.ndarray:
         c,
     )
 
-def process_base(th: np.ndarray) -> np.ndarray:
+def process_base(th: np.ndarray):
     """
     Bearbetning för vanliga foton(olinjerat papper) en mild open/close med dialation
     """
@@ -124,7 +124,7 @@ def process_base(th: np.ndarray) -> np.ndarray:
     th = cv2.dilate(th, kernel, iterations=1)
     return th
 
-def remove_lines(th: np.ndarray) -> np.ndarray:
+def remove_lines(th: np.ndarray):
     """
     Hitta horisontella linjer med hough och maska dem
     """
@@ -141,7 +141,7 @@ def remove_lines(th: np.ndarray) -> np.ndarray:
 
     return cv2.bitwise_and(th, cv2.bitwise_not(line_mask))
 
-def process_ruled(th: np.ndarray) -> np.ndarray:
+def process_ruled(th: np.ndarray):
     """
     Försöka fyll aigen där linjer skär siffran
     """
@@ -150,7 +150,7 @@ def process_ruled(th: np.ndarray) -> np.ndarray:
     th = cv2.dilate(th, kernel, iterations=2)
     return th
 
-def find_bounding_box(th: np.ndarray, mode: Mode) -> tuple[int, int, int, int]:
+def find_bounding_box(th: np.ndarray, mode: Mode):
     """
     Hitta siffrans bounding box och filtrera för att undvika brus samt skuggkanter
     """
@@ -206,7 +206,7 @@ def find_bounding_box(th: np.ndarray, mode: Mode) -> tuple[int, int, int, int]:
     x, y, w, h = cv2.boundingRect(c)
     return x, y, w, h
 
-def mnist_28x28(th: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
+def mnist_28x28(th: np.ndarray, bbox: tuple[int, int, int, int]):
     """
     Beskär siffran formatera till 20x20 med padding 28x28 och centrering som centre of mass.
     """
@@ -234,7 +234,7 @@ def mnist_28x28(th: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray:
 
     return padded
 
-def preprocess_to_mnist(pil_img: Image.Image, mode: Mode) -> np.ndarray:
+def preprocess_to_mnist(pil_img: Image.Image, mode: Mode):
     """
     konvertera PIL-bild till 28x28 med MNIST-likande array 1x784
     """
