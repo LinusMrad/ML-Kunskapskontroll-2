@@ -23,7 +23,6 @@ from streamlit_drawable_canvas import st_canvas
 #==========================================
 # ------- Konstanter/konfigurering---------
 #==========================================
- 
 # här samlar jag alla tal som används
 # i appen för att senare använda som variabler, det underlättar konfigueringen
 
