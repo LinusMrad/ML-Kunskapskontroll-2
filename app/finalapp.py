@@ -27,36 +27,45 @@ from streamlit_drawable_canvas import st_canvas
 # här samlar jag alla tal som används
 # i appen för att senare använda som variabler, det underlättar konfigueringen
 
-Mode = Literal["Bas (vanliga foton)", "Linjerat papper"]
+# låser valet mellan två alternativ
+Mode = Literal["Bas (vanliga foton)", "Linjerat papper"] 
 
-max_side_px = 900
+# bilder större än 900 opixlar skalas ner, för snabbhet och stabilitet
+max_side_px = 900 
 
-clahe_clip_limit = 2.0
-clahe_tile_grid = (8, 8)
+# styr kontrastutjämning
+clahe_clip_limit = 2.0 
+clahe_tile_grid = (8, 8) 
 
-dark_image_mean_threshold = 80 # om bilden är väldigt mörk inverteras den.
+# om bilden är väldigt mörk inverteras den.
+dark_image_mean_threshold = 80 
 
-gauss_kernel = (5, 5)
-morph_kernel = (3, 3)
+gauss_kernel = (5, 5) # Styr blur
+morph_kernel = (3, 3) # styr morfologi
 
-min_area = 500
+# Reglerar filtrerringen för att filtrerera bvrus och kontrast
+min_area = 500 
 max_area_ratio = 0.30
 max_aspect = 5.0
 top_margin_ratio = 0.10
 
+# MNIST format
 mnist_size = 28
 mnist_inner_size = 20
 mnist_padding = 4
 
+# Canvs storlek och pennan tjocklek
 canvas_size = 280
 canvas_stroke = 18
 
 #==============================================
 #------------- Ladda modeller------------------
 #==============================================
-@st.cache_resource
+@st.cache_resource # Gör att streamlit inte laddar modellerna varje gång appen behöver köras om. 
 def load_model(model_path: Path):
-    """Laddar en sparad modell från hårddisk (cache för att slippa ladda modellerna varej gång sidan laddas)"""
+    """
+    Laddar en sparad modell från lokalt minne 
+    """
     return joblib.load(str(model_path))
 
 
@@ -83,10 +92,12 @@ def resize(grey: np.ndarray, max_side: int = max_side_px):
     """
     Skala stora bilder för stabilare och snabbare app
     """
+    # Är bilden mindre eller lika med max_side återger den en gråskalebild
     h, w = grey.shape[:2]
     if max(h, w) <= max_side:
         return grey
 
+    # Om bilden är större än max_side återger den en nerskalad bild proportioneligt
     scale = max_side / max(h, w)
     new_w = int(w * scale)
     new_h = int(h * scale)
@@ -94,7 +105,8 @@ def resize(grey: np.ndarray, max_side: int = max_side_px):
 
 def apply_clahe(grey: np.ndarray) -> np.ndarray:
     """
-    Kontrastutjämning för ojämnt ljus och skuggor
+    Kontrastutjämning för ojämnt ljus och skuggor, delar upp bilden i rutmänster
+    och returenrar en förbättrad bild
     """
     clahe = cv2.createCLAHE(clipLimit=clahe_clip_limit, tileGridSize=clahe_tile_grid)
     return clahe.apply(grey)
@@ -102,6 +114,7 @@ def apply_clahe(grey: np.ndarray) -> np.ndarray:
 def adaptive_threshold(grey_blur: np.ndarray):
     """
     Adaptiv tröskling och dynamisk blockstorlek för att fungera på olika upplösningar.
+    Gör bilden binär med vitt= 255 och svart = 0
     """
     block = max(35, (min(grey_blur.shape) // 20) | 1) # Alltid udda tal
     c = 7
@@ -119,26 +132,37 @@ def process_base(th: np.ndarray):
     Bearbetning för vanliga foton(olinjerat papper) en mild open/close med dialation
     """
     kernel = np.ones(morph_kernel, np.uint8)
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
-    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1)
-    th = cv2.dilate(th, kernel, iterations=1)
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1) # Tar bort små vita prickar för att minska brus
+    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=1) # Fyller hål i siffran.
+    th = cv2.dilate(th, kernel, iterations=1) # Gör siffran tjockare för att hjälpa vid tunna streck
     return th
 
 def remove_lines(th: np.ndarray):
     """
     Hitta horisontella linjer med hough och maska dem
     """
+
+    # Identifiera hosrisontella linjer
     w = th.shape[1]
     lines = cv2.HoughLinesP(
-        th, 1, np.pi / 180, threshold=150, minLineLength=w // 3, maxLineGap=30
+        th, 
+        1, 
+        np.pi / 180, 
+        threshold=150, 
+        minLineLength=w // 3, # bara linjer som är minst en tredjedel av bilden accepteras
+        maxLineGap=30 # Linjer som är lite brutna accepteras ändå pga skuggor och kontraster.
     )
+
+    # Skapr en tom maskering
     line_mask = np.zeros_like(th)
 
+    # Ritar linjerna i den tomma masken
     if lines is not None:
         for (x1, y1, x2, y2) in lines[:, 0]:
             if abs(y2 - y1) < 15:  # ungefär horisontell
-                cv2.line(line_mask, (x1, y1), (x2, y2), 255, 8)
+                cv2.line(line_mask, (x1, y1), (x2, y2), 255, 8) # maskera linjerna genom att rita vita streck över
 
+    # kombinerar den maskerade bilden med originalbilden för att maskera linjerna. 
     return cv2.bitwise_and(th, cv2.bitwise_not(line_mask))
 
 def process_ruled(th: np.ndarray):
@@ -146,34 +170,38 @@ def process_ruled(th: np.ndarray):
     Försöka fyll aigen där linjer skär siffran
     """
     kernel = np.ones(morph_kernel, np.uint8)
-    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=2)
-    th = cv2.dilate(th, kernel, iterations=2)
+    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=2) # Stänger gapet i siffran där linjer tagits bort
+    th = cv2.dilate(th, kernel, iterations=2) # gör siffran tjockare för lättare identifirering
     return th
 
 def find_bounding_box(th: np.ndarray, mode: Mode):
     """
-    Hitta siffrans bounding box och filtrera för att undvika brus samt skuggkanter
+    Hittar den mest sannolika siffran genom att välja största rimliga konturren,
+    i linjerat läge slår den ihop närliggande konturer eftersom siffrran kan bli splittrad av borttagna linjer
     """
-    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Hitta sammanhängande vita områden
+    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) # Tar bara ytterkonturer och nte konturer i hål för tex 8 och 0
     if not contours:
-        return 0, 0, th.shape[1], th.shape[0]
+        return 0, 0, th.shape[1], th.shape[0] # Hittas inga konturer återfaller den till att ha hela bilden som boudning box
 
+    # Filtreerar bort konturer som är för stora relativt till bilden.
     img_h, img_w = th.shape
     total_area = img_h * img_w
 
+    # Filtrera bort brus
     valid = []
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
         area = cv2.contourArea(c)
         aspect = w / max(h, 1)
 
-        if area < min_area:
+        if area < min_area: # ta bort småpartiklar och brus
             continue
-        if area > total_area * max_area_ratio:
+        if area > total_area * max_area_ratio: # Tar bort stora områden, tex skugga, papperskanter
             continue
-        if aspect > max_aspect:
+        if aspect > max_aspect: # Tar bort långsmala konturer som är för breda i förhållande till höjden
             continue
-        if y < img_h * top_margin_ratio:
+        if y < img_h * top_margin_ratio: # tar bort saker nära toppen tex skuggkant, papperskant 
             continue
 
         valid.append(c)
@@ -185,23 +213,25 @@ def find_bounding_box(th: np.ndarray, mode: Mode):
     candidates = valid if valid else contours
 
     if mode == "Linjerat papper" and valid:
-        # Huvudkontur + närliggande konturer för streck som brutits av linjerna
+        # Huvudkontur och närliggande konturer för streck som brutits av linjerna
         main = max(valid, key=cv2.contourArea)
         mx, my, mw, mh = cv2.boundingRect(main)
 
+        # hitta och samla konturer som ligger i ugnefär samma vertikala spannn som huvudkonturen ifall siffran blivit splittrad.
         nearby = []
         for c in valid:
             x, y, w, h = cv2.boundingRect(c)
-            if y < my + mh * 1.5 and (y + h) > my - mh * 0.5:
+            if y < my + mh * 1.5 and (y + h) > my - mh * 0.5: # hittar konturer som ligger lagom långt från huvudkonturen
                 nearby.append(c)
         
-        # Säkerhetsfallback: om inga nearby hittas, använd huvudkonturen
+        # Säkerhetsfallback om inga nearby hittas, använd huvudkonturen
         nearby = nearby if nearby else [main]
 
         all_points = np.vstack(nearby)
         x, y, w, h = cv2.boundingRect(all_points)
         return x, y, w, h
 
+    # om inte linjerat papper hitta största konturen och anväönd som bounding box.
     c = max(candidates, key=cv2.contourArea)
     x, y, w, h = cv2.boundingRect(c)
     return x, y, w, h
@@ -210,33 +240,38 @@ def mnist_28x28(th: np.ndarray, bbox: tuple[int, int, int, int]):
     """
     Beskär siffran formatera till 20x20 med padding 28x28 och centrering som centre of mass.
     """
-    x, y, w, h = bbox
-    digit = th[y : y + h, x : x + w]
+    
+    x, y, w, h = bbox # beskär ut boundingbox
+    digit = th[y : y + h, x : x + w] # beskär regionen där siffran är
 
-    size = max(w, h)
-    square = np.zeros((size, size), dtype=np.uint8)
-    x_off = (size - w) // 2
+    # skalar ner bilden och behåller proportionerna
+    size = max(w, h) # största sidan av boxen
+    square = np.zeros((size, size), dtype=np.uint8) 
+    # beräknar offset så siffran blir centrerad i kvadraten
+    x_off = (size - w) // 2 
     y_off = (size - h) // 2
-    square[y_off : y_off + h, x_off : x_off + w] = digit
+    square[y_off : y_off + h, x_off : x_off + w] = digit # 
 
+    # omstrukturterar till 20x20 och lägger till padding till 28x28, lägger siffran i mitten med marginal runt som MNISt
     digit_20 = cv2.resize(square, (mnist_inner_size, mnist_inner_size), interpolation=cv2.INTER_AREA)
     padded = np.zeros((mnist_size, mnist_size), dtype=np.uint8)
     padded[mnist_padding : mnist_padding + mnist_inner_size, mnist_padding : mnist_padding + mnist_inner_size] = digit_20
 
-    # Center of mass centrering för stabilare beabrbetning är bara bounding box
-    coords = np.column_stack(np.where(padded > 0))
-    if len(coords) > 0:
+    # centrerar siffran baserat på pixlar med bläcks tyngdpunkt
+    coords = np.column_stack(np.where(padded > 0)) # Alla kordinater där det finns bläck(vita pixlar)
+    if len(coords) > 0: # återger medelpostionen för alla pixlar med bläck
         cy, cx = coords.mean(axis=0)
-        shift_x = int(np.round((mnist_size // 2) - cx))
-        shift_y = int(np.round((mnist_size // 2) - cy))
-        M = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
+        # räkna hur mycket bilden måste förskjutas för att hamna i mitten
+        shift_x = int(np.round((mnist_size // 2) - cx)) # rättar upp bilden i x axeln
+        shift_y = int(np.round((mnist_size // 2) - cy)) # rättar upp bilden i y axeln
+        M = np.float32([[1, 0, shift_x], [0, 1, shift_y]]) 
         padded = cv2.warpAffine(padded, M, (mnist_size, mnist_size))
 
     return padded
 
 def preprocess_to_mnist(pil_img: Image.Image, mode: Mode):
     """
-    konvertera PIL-bild till 28x28 med MNIST-likande array 1x784
+    konvertera PIL-bild till 28x28 med MNIST-likande array 1x784 och gråskala
     """
     grey = np.array(ImageOps.grayscale(pil_img))
 
@@ -244,13 +279,13 @@ def preprocess_to_mnist(pil_img: Image.Image, mode: Mode):
     grey = apply_clahe(grey)
 
     # Om väldigt mörk bild: invertera så att siffran blir ljus mot mörk bakgrund,
-    # men eftersom vi använder THRESH_BINARY_INV kan detta hjälpa i vissa fall.
     if np.mean(grey) < dark_image_mean_threshold:
         grey = 255 - grey
 
     grey_blur = cv2.GaussianBlur(grey, gauss_kernel, 0)
     th = adaptive_threshold(grey_blur)
 
+    # beroende på mode valt i appen hanteras bilden olika
     if mode == "Bas (vanliga foton)":
         th = process_base(th)
     else:
