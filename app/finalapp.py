@@ -309,6 +309,7 @@ def main() -> None:
     st.title("MNIST känn igen siffror")
     st.caption("Jämförelse mellan Extra Trees och SVC på MNIST")
 
+    # sökvägar till modellerna
     base_dir = Path(__file__).resolve().parents[1]
     ext_path = base_dir / "models" / "EXT_produktion.pkl"
     svc_path = base_dir / "models" / "SVC_produktion.pkl"
@@ -317,9 +318,10 @@ def main() -> None:
         ext_model = load_model(ext_path)
         svc_model = load_model(svc_path)
     except Exception as e:
-        st.error(f"Kunde inte ladda modell: {e}")
+        st.error(f"Kunde inte ladda modell: {e}") # om modellen inte laddas korrekt får vi felmeddelande. 
         st.stop()
 
+    #sidobar för inställningar.
     with st.sidebar:
         st.header("⚙️ Inställningar")
         show_debug = st.checkbox("Visa tekniska detaljer (debug)", value=False)
@@ -332,6 +334,7 @@ def main() -> None:
     if "canvas_key" not in st.session_state:
         st.session_state.canvas_key = "canvas_0"
 
+    # bälj metod för input, rita, ladda upp eller ta bild
     input_choice = st.radio(
         "Välj metod",
         ["🎨 Rita själv", "📁 Ladda upp en bild", "📷 Ta en bild"],
@@ -383,6 +386,7 @@ def main() -> None:
                 else:
                     st.info("🎨 Rita en siffra")
 
+    # ser till att modellerna inte körs om det inte finns en bild och användaren tryckt "prediktera"
     with right:
         st.subheader("Resultat")
         if image is None:
