@@ -7,7 +7,7 @@ Modeller: Extra Trees och SVC för jämförelse direkt i appen
 """
 
 #==========================================
-# --------------- Import---------------
+# --------------- Import-------------------
 #==========================================
 from __future__ import annotations
 from typing import Literal, Optional
@@ -21,7 +21,7 @@ import pandas as pd
 from streamlit_drawable_canvas import st_canvas
 
 #==========================================
-# --------------- Konstanter---------------
+# ------- Konstanter/konfigurering---------
 #==========================================
  
 # här samlar jag alla tal som används
@@ -176,7 +176,7 @@ def process_ruled(th: np.ndarray):
 
 def find_bounding_box(th: np.ndarray, mode: Mode):
     """
-    Hittar den mest sannolika siffran genom att välja största rimliga konturren,
+    Hittar den mest sannolika siffran genom att välja största rimliga konturen,
     i linjerat läge slår den ihop närliggande konturer eftersom siffrran kan bli splittrad av borttagna linjer
     """
     # Hitta sammanhängande vita områden
