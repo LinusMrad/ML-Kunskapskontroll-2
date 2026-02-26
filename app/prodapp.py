@@ -9,7 +9,6 @@ Modeller: Extra Trees och SVC för jämförelse direkt i appen
 #==========================================
 # --------------- Import-------------------
 #==========================================
-from __future__ import annotations
 from typing import Literal, Optional
 import streamlit as st
 import joblib
@@ -21,7 +20,7 @@ import pandas as pd
 from streamlit_drawable_canvas import st_canvas
 
 #==========================================
-# ------- Konstanter/konfigurering---------
+# -------Konstanter/konfigurering----------
 #==========================================
 # här samlar jag alla tal som används
 # i appen för att senare använda som variabler, det underlättar konfigueringen
@@ -91,7 +90,7 @@ def resize(grey: np.ndarray, max_side: int = max_side_px):
     """
     Skala stora bilder för stabilare och snabbare app
     """
-    # Är bilden mindre eller lika med max_side återger den en gråskalebild
+    # Är bilden mindre eller lika med max_side återger den samam bild
     h, w = grey.shape[:2]
     if max(h, w) <= max_side:
         return grey
