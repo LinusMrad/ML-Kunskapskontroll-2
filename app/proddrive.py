@@ -331,10 +331,10 @@ def main() -> None:
     base_dir = Path(__file__).resolve().parents[1]
     models_dir = base_dir / "models"
 
-    EXT_URL = "https://drive.google.com/file/d/1x7D76TIunyXw0p6SSmEC_DQ9oa67KfN-/view?usp=drive_link"
-    SVC_URL = "https://drive.google.com/file/d/1e77q5w9IHJTR6jZpwmBQQZkM6KWFTKoZ/view?usp=drive_link"
+    EXT_ID = "1x7D76TIunyXw0p6SSmEC_DQ9oa67KfN-"
+    SVC_ID = "1e77q5w9IHJTR6jZpwmBQQZkM6KWFTKoZ"
 
-    ext_path, svc_path = ensure_models_downloaded(EXT_URL, SVC_URL, models_dir)
+    ext_path, svc_path = ensure_models_downloaded(EXT_ID, SVC_ID, models_dir)
 
     try:
         ext_model = load_model(ext_path)
