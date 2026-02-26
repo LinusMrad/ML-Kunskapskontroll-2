@@ -67,21 +67,23 @@ def load_model(model_path: Path):
     """
     return joblib.load(str(model_path))
 
-def ensure_models_downloaded(ext_url: str, svc_url: str, models_dir: Path) -> tuple[Path, Path]:
-    """
-    Ser till att båda modeller finns lokalt. Laddar ner från Google Drive om de saknas.
-    Returnerar paths till de lokala filerna.
-    """
+def ensure_models_downloaded(ext_id: str, svc_id: str, models_dir: Path) -> tuple[Path, Path]:
     models_dir.mkdir(parents=True, exist_ok=True)
 
     ext_path = models_dir / "EXT_produktion.pkl"
     svc_path = models_dir / "SVC_produktion.pkl"
 
+    # Om filen finns men är misstänkt liten (ofta en HTML-sida), ta bort den
+    if ext_path.exists() and ext_path.stat().st_size < 200_000:
+        ext_path.unlink()
+    if svc_path.exists() and svc_path.stat().st_size < 200_000:
+        svc_path.unlink()
+
     if not ext_path.exists():
-        gdown.download(ext_url, str(ext_path), quiet=False)
+        gdown.download(id=ext_id, output=str(ext_path), quiet=False)
 
     if not svc_path.exists():
-        gdown.download(svc_url, str(svc_path), quiet=False)
+        gdown.download(id=svc_id, output=str(svc_path), quiet=False)
 
     return ext_path, svc_path
 
